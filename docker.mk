@@ -11,6 +11,11 @@ ROOT_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 # Пример: sudo "ENV1=value1" "ENV2=value with spaces" "ENV3=value3" -u tirion -s
 GET_ENVS := IFS=";" ENVS=(`get-forwarded-envs`)
 
+# получаем uid и gid пользователя
+USER_UID := $(shell docker run --rm $(IMAGE_ID) id -u $(USER))
+USER_GID := $(shell docker run --rm $(IMAGE_ID) id -g $(USER))
+TEMP_VOLUME := temp_volume
+
 docs-js:
 	docker exec -it $(CONTAINER_ID) /bin/bash -c '$(GET_ENVS) && sudo "$${ENVS[@]}" -u $(USER) rm -rf docs && mkdir -p docs && /import-documentation/dist/bin/import-documentation.js . -o docs'
 
@@ -31,12 +36,30 @@ endif
 build: stop
 	docker build -t $(IMAGE_ID) .
 
-bash:
-	docker run --rm --read-only -it -v /tmp \
-		-v $(ROOT_DIR)scripts/get-forwarded-envs:/usr/local/bin/get-forwarded-envs \
+
+# небольшой хак, чтобы маунтить вольюм практики CURDIR/exercise с uid и gid пользователя внутри контейнера
+# создаем промежуточный контейнер, в котором меняем права на USER
+# промежуточный контейнер необходим, тк в командах bash и start вольюм монтируется в read-only
+temp-volume:
+	docker volume create --name $(TEMP_VOLUME)
+
+	docker run --rm \
+	  -v $(CURDIR)/exercise/:/from \
+	  -v $(TEMP_VOLUME):/to \
+	  alpine sh -c 'cp -R /from/* /to && chown -R $(USER_UID):$(USER_GID) /to'
+
+rm-volume:
+	docker volume rm -f $(TEMP_VOLUME)
+
+bash: rm-volume temp-volume
+	docker run --rm --read-only -it \
+	  -v /tmp \
+	  -v $(ROOT_DIR)scripts/get-forwarded-envs:/usr/local/bin/get-forwarded-envs \
 	  -v $(CURDIR)/exercise_internal:/exercise_internal \
-	  -v $(CURDIR)/exercise/:/usr/src/app $(IMAGE_ID) \
-	  /bin/bash -c '$(GET_ENVS) && sudo "$${ENVS[@]}" -u $(USER) -s'
+	  -v $(TEMP_VOLUME):/usr/src/app \
+	  $(IMAGE_ID) \
+	  /bin/bash -c '$(GET_ENVS) && sudo "$${ENVS[@]}" -u tirion -s'
+
 
 bash-root:
 	docker run --rm -it -v /tmp \
@@ -54,7 +77,7 @@ endif
 logs:
 	docker logs -f $(CONTAINER_ID)
 
-start: stop
+start: stop rm-volume temp-volume
 ifeq ([], $(shell docker inspect $(IMAGE_ID) 2> /dev/null))
 	@ echo "Please, run 'make build' before 'make start'" >&2; exit 1;
 else
@@ -70,7 +93,7 @@ else
 		-v /tmp \
 		-v /var/tmp \
 		-v $(ROOT_DIR)scripts/get-forwarded-envs:/usr/local/bin/get-forwarded-envs \
-		-v $(CURDIR)/exercise/:/usr/src/app \
+		-v $(TEMP_VOLUME):/usr/src/app \
 		-v $(CURDIR)/exercise_internal:/exercise_internal \
 		-p 8000:8000 -p 80:8080 -p 5006:5006 --name $(CONTAINER_ID) $(IMAGE_ID)
 endif
