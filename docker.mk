@@ -100,7 +100,7 @@ lint-js:
 	@npx eslint .
 
 lint-hexlet-python:
-	@make lint L=python-flake8
+	@make lint L=python-ruff
 
 lint-hexlet-js:
 	@make lint L=eslint

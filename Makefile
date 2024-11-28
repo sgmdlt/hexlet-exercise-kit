@@ -72,6 +72,7 @@ update-hexlet-linters:
 	make update-hexlet-linter L=sqlint
 	make update-hexlet-linter L=rubocop
 	make update-hexlet-linter L=multi-language
+	make update-hexlet-linter L=python-ruff
 
 create-localizer-config:
 	cp -n content-localizer/.env.template content-localizer/.env || echo 'already exists'
